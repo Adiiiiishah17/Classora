@@ -1,0 +1,1 @@
+ const { checkPassword } = require("../validators/passwordPolicy");
