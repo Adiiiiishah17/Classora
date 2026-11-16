@@ -4,8 +4,8 @@ import ThemeToggle from "./ThemeToggle";
 /* ===================== EDIT YOUR BRAND HERE ===================== */
 export const BRAND = {
   name: "Meenal",
-  logo: "/logo.png", // the file is at D:\Meenal\client\public\logo.png
-  logoZoom: 1.9, // how close the logo is. Higher = closer. If the logo gets cut off, lower it (try 1.6)
+  logo: "/logo.jpg", // the file is at D:\Meenal\client\public\logo.jpg
+  logoZoom: 0.8, // how close the logo is. Higher = closer. If the logo gets cut off, lower it (try 1.6)
   logoWhiten: true, // fades the light grey behind the logo to white. Set to false for a transparent PNG
   slogan: "Learn without limits.", // EDIT: your slogan. Use \n for a line break
   quoteLead: "No local coaching? Too expensive? Problem solved.",

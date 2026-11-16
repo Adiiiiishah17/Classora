@@ -96,7 +96,7 @@ export default function MyLoginCode() {
     ctx.fillText(code, out.width / 2, src.height + pad + 55);
     const a = document.createElement("a");
     a.href = out.toDataURL("image/png");
-    a.download = "meenal-login-code.png";
+    a.download = "classora-login-code.png";
     a.click();
   }
 

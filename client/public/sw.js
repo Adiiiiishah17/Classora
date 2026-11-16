@@ -6,7 +6,7 @@ self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     if (wins.some((w) => w.visibilityState === "visible")) return; // the open page already shows it live
-    await self.registration.showNotification(data.title || "School", { body: data.body || "" });
+    await self.registration.showNotification(data.title || "Classora", { body: data.body || "" });
   })());
 });
 

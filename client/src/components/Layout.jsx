@@ -61,8 +61,7 @@ function Shell() {
               <Menu size={20} />
             </button>
             <div className="font-heading whitespace-nowrap text-xl font-extrabold sm:text-2xl">
-              <span className="bg-gradient-to-r from-brand-500 to-accent-500 bg-clip-text text-transparent">Meenal</span>
-              <span className="hidden sm:inline"> School</span>
+                          <span className="bg-gradient-to-r from-brand-500 to-accent-500 bg-clip-text text-transparent">Classora</span>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2 whitespace-nowrap sm:gap-3">
