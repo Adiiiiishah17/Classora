@@ -9,7 +9,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import ChangePassword from "./pages/ChangePassword";
 import StudentHome from "./pages/student/StudentHome";
-import TeacherHome from "./pages/teacher/TeacherHome";
+import TeacherHome from "./pages/Teacher/TeacherHome";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 
 function RootRedirect() {
