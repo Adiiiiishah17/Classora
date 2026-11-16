@@ -1,5 +1,8 @@
+const fs = require("fs");
+const { pipeline } = require("stream/promises");
 const Doc = require("../models/Document");
 const storage = require("../utils/storage");
+const gridfs = require("../utils/gridfs");
 const v = require("../validators/phase4Validators");
 const { visibleFilter, recipientIds, roomsFor } = require("../utils/audience");
 const { audit } = require("../utils/audit");
@@ -32,7 +35,7 @@ exports.list = async (req, res) => {
 
 exports.create = async (req, res) => {
   const file = req.file;
-  let finalName = null;
+  let fileId = null;
   let doc;
   try {
     if (!file) throw httpError("Choose a file.", 400);
@@ -51,15 +54,15 @@ exports.create = async (req, res) => {
     const problem = await storage.contentProblem(file.path, ext);
     if (problem) throw httpError(problem, 400);
 
-    finalName = file.filename.replace(/\.part$/, `.${ext}`);
-    await storage.promote(file.filename, finalName);
+    const originalName = cleanName(file.originalname, ext);
+    fileId = await gridfs.save("documents", fs.createReadStream(file.path), originalName, storage.TYPES[ext].mime);
 
     doc = await Doc.create({
       title: d.title,
       audience: d.audience,
       className: d.audience === "class" ? d.className : undefined,
-      originalName: cleanName(file.originalname, ext),
-      storedName: finalName,
+      originalName,
+      storedName: fileId, // the file's id inside MongoDB
       ext,
       size: file.size,
       authorId: req.user.id,
@@ -67,9 +70,10 @@ exports.create = async (req, res) => {
       authorRole: req.user.role,
     });
   } catch (err) {
-    if (file) await storage.remove(file.filename); // never keep a rejected upload
-    if (finalName) await storage.remove(finalName);
+    if (fileId) await gridfs.remove("documents", fileId); // never keep a rejected upload
     throw err;
+  } finally {
+    if (file) await storage.remove(file.filename); // the temporary copy is always deleted
   }
 
   await audit(req, "document.post", {
@@ -101,26 +105,32 @@ exports.file = async (req, res) => {
   const doc = await Doc.findOne({ $and: [{ _id: id }, filter] }).lean();
   if (!doc) throw httpError("File not found.", 404);
 
-  const ext = storage.TYPES[doc.ext] ? doc.ext : "pdf"; // older documents have no type: they are PDFs
+  const stored = await gridfs.info("documents", doc.storedName);
+  if (!stored) throw httpError("File not found.", 404);
+
+  const ext = storage.TYPES[doc.ext] ? doc.ext : "pdf";
   const inline = !download && storage.isViewable(ext);
   const ascii = doc.originalName.replace(/[^A-Za-z0-9._-]/g, "_");
 
-  res.sendFile(
-    storage.fullPath(doc.storedName),
-    {
-      cacheControl: false,
-      headers: {
-        "Content-Type": storage.mimeFor(ext, !inline),
-        "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(doc.originalName)}`,
-        "Cache-Control": "private, no-store",
-        "X-Content-Type-Options": "nosniff",
-        ...(LOCKED.has(ext) ? { "Content-Security-Policy": LOCK_CSP } : {}),
-      },
-    },
-    (err) => {
-      if (err && !res.headersSent) res.status(404).json({ success: false, message: "File not found." });
+  res.set({
+    "Content-Type": storage.mimeFor(ext, !inline),
+    "Content-Length": String(stored.length),
+    "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(doc.originalName)}`,
+    "Cache-Control": "private, no-store",
+    "X-Content-Type-Options": "nosniff",
+    ...(LOCKED.has(ext) ? { "Content-Security-Policy": LOCK_CSP } : {}),
+  });
+
+  try {
+    await pipeline(gridfs.open("documents", doc.storedName), res);
+  } catch {
+    if (!res.headersSent) {
+      res.removeHeader("Content-Length");
+      res.removeHeader("Content-Disposition");
+      throw httpError("File not found.", 404);
     }
-  );
+    res.destroy(); // the download was cut off halfway
+  }
 };
 
 exports.remove = async (req, res) => {
@@ -131,7 +141,7 @@ exports.remove = async (req, res) => {
   }
 
   await doc.deleteOne();
-  await storage.remove(doc.storedName);
+  await gridfs.remove("documents", doc.storedName);
 
   await audit(req, "document.delete", {
     targetType: "document",

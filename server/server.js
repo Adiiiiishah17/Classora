@@ -23,6 +23,8 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const announcementRoutes = require("./routes/announcementRoutes");
 const documentRoutes = require("./routes/documentRoutes");
 const profileRoutes = require("./routes/profileRoutes");
+const path = require("path");
+const fs = require("fs");
 
 // ---- Config validation ----
 for (const key of ["MONGODB_URI", "JWT_SECRET", "GOOGLE_CLIENT_ID"]) {
@@ -41,12 +43,42 @@ const isProd = process.env.NODE_ENV === "production";
 
 const app = express();
 app.disable("x-powered-by");
-if (isProd) app.set("trust proxy", 1); // set to your real proxy hop count
+if (isProd) app.set("trust proxy", Number(process.env.TRUST_PROXY || 1)); // set to your real proxy hop count
 
-app.use(helmet());
+// Browser security rules for the pages themselves (Google sign-in and Google Fonts are the only outside sources)
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "script-src": ["'self'", "https://accounts.google.com/gsi/client"],
+        "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://accounts.google.com/gsi/style"],
+        "font-src": ["'self'", "https://fonts.gstatic.com", "data:"],
+        "img-src": ["'self'", "data:", "blob:"],
+        "connect-src": ["'self'", CLIENT_ORIGIN.replace(/^http/, "ws"), "https://accounts.google.com/gsi/"],
+        "frame-src": ["https://accounts.google.com/gsi/"],
+      },
+    },
+    // Google's sign-in popup needs this setting
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+  })
+);
+
+
 app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
+// Production: browsers must send changes from our own site only
+if (isProd) {
+  app.use((req, res, next) => {
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
+    const origin = req.headers.origin;
+    if (origin && origin !== CLIENT_ORIGIN) {
+      return res.status(403).json({ success: false, message: "Request blocked." });
+    }
+    next();
+  });
+}
 
 // ---- Rate limits ----
 const limiter = (windowMs, limit, message) =>
@@ -61,7 +93,7 @@ const limiter = (windowMs, limit, message) =>
 const apiLimiter = limiter(15 * 60 * 1000, 600); // many students may share one school IP
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: isProd ? 10 : 200,
+  limit: isProd ? 30 : 200,
   skipSuccessfulRequests: true, // only failed attempts count
   standardHeaders: "draft-8",
   legacyHeaders: false,
@@ -99,6 +131,28 @@ app.use("/api/announcements", announcementRoutes);
 app.use("/api/documents", documentRoutes);
 app.use("/api/profile", profileRoutes);
 
+
+// TEMPORARY: shows which TRUST_PROXY number gives your real IP. Delete this route after Part 4, step 3.
+app.get("/__ip", (req, res) => res.json({ ip: req.ip, forwardedFor: req.headers["x-forwarded-for"] || null }));
+
+// ---- Serve the built React app (production only) ----
+const clientDist = path.join(__dirname, "..", "client", "dist");
+if (isProd && fs.existsSync(path.join(clientDist, "index.html"))) {
+  app.use(
+    express.static(clientDist, {
+      index: false,
+      setHeaders: (res, filePath) => {
+        const hashed = filePath.includes(`${path.sep}assets${path.sep}`); // Vite puts a hash in these file names
+        res.setHeader("Cache-Control", hashed ? "public, max-age=31536000, immutable" : "no-cache");
+      },
+    })
+  );
+  // Any other page address (like /admin/login or /student) opens the React app
+  app.get(/^\/(?!api(?:\/|$)|socket\.io(?:\/|$)|health$).*/, (req, res) => {
+    res.set("Cache-Control", "no-cache");
+    res.sendFile(path.join(clientDist, "index.html"));
+  });
+}
 // ---- 404 and error handling (always last) ----
 app.use((req, res) => {
   res.status(404).json({ success: false, message: "Route not found" });

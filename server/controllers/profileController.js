@@ -6,6 +6,7 @@ const userService = require("../services/userService");
 const photos = require("../utils/photoStorage");
 const { verifyPassword } = require("../utils/password");
 const { audit } = require("../utils/audit");
+const { pipeline } = require("stream/promises");
 const { refreshRooms } = require("../sockets");
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
@@ -147,18 +148,17 @@ exports.uploadPhoto = async (req, res) => {
   const type = photos.detectType(req.file.buffer);
   if (!type) throw httpError("Only JPG, PNG or WebP photos are allowed.", 400);
 
-  const storedName = `${crypto.randomBytes(16).toString("hex")}.${type.ext}`;
-  await photos.write(storedName, req.file.buffer);
+  const storedId = await photos.save(req.file.buffer, type.ext);
 
   const now = new Date();
   let before;
   try {
     // returns the document as it was before the update, so we know which old file to delete
-    before = await User.findByIdAndUpdate(req.user.id, { photoName: storedName, photoUpdatedAt: now })
+    before = await User.findByIdAndUpdate(req.user.id, { photoName: storedId, photoUpdatedAt: now })
       .select("photoName")
       .lean();
   } catch (err) {
-    await photos.remove(storedName); // do not leave an orphan file behind
+    await photos.remove(storedId); // do not leave an orphan file behind
     throw err;
   }
   if (before?.photoName) await photos.remove(before.photoName);
@@ -196,20 +196,29 @@ exports.photo = async (req, res) => {
   const allowed =
     target &&
     (me.id === id || me.role === "admin" || (me.role === "student" && target.role === "teacher" && target.isActive));
+  const none = () => res.status(404).json({ success: false, message: "No photo." });
 
-  if (!allowed || !target.photoName || !photos.NAME_RE.test(target.photoName)) {
-    return res.status(404).json({ success: false, message: "No photo." });
-  }
+  if (!allowed || !target.photoName || !photos.NAME_RE.test(target.photoName)) return none();
+  const stored = await photos.info(target.photoName);
+  if (!stored) return none();
 
   res.set({
-    "Content-Type": photos.mimeFor(target.photoName),
-    "Cache-Control": "private, no-cache",
+    "Content-Type": stored.metadata?.mime || "application/octet-stream",
+    "Content-Length": String(stored.length),
+    // The address contains ?v=, which changes with every new photo, so a short cache is safe and keeps the small server fast
+    "Cache-Control": "private, max-age=3600",
     "X-Content-Type-Options": "nosniff",
     "Content-Disposition": "inline",
   });
-  res.sendFile(target.photoName, { root: photos.DIR, dotfiles: "deny", cacheControl: false }, (err) => {
-    if (err && !res.headersSent) res.status(404).json({ success: false, message: "No photo." });
-  });
+  try {
+    await pipeline(photos.open(target.photoName), res);
+  } catch {
+    if (!res.headersSent) {
+      res.removeHeader("Content-Length");
+      return none();
+    }
+    res.destroy();
+  }
 };
 
 /* ---------------- Know your tutor (students) ---------------- */

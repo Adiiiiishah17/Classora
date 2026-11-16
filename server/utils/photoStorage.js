@@ -1,13 +1,8 @@
-const fs = require("fs");
-const fsp = require("fs/promises");
-const path = require("path");
-
-// Set PHOTO_DIR in .env to keep photos on a persistent disk when you deploy
-const DIR = path.resolve(process.env.PHOTO_DIR || path.join(__dirname, "..", "uploads", "photos"));
-fs.mkdirSync(DIR, { recursive: true });
+const { Readable } = require("stream");
+const gridfs = require("./gridfs");
 
 const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
-const NAME_RE = /^[a-f0-9]{32}\.(jpg|png|webp)$/;
+const NAME_RE = /^[a-f0-9]{24}$/;   // a photo's id inside MongoDB
 const MIME = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
 
 // The real type comes from the first bytes of the file, never from the name or the browser
@@ -19,15 +14,11 @@ function detectType(buf) {
   return null;
 }
 
-const mimeFor = (name) => MIME[name.split(".").pop()] || "application/octet-stream";
+const mimeFor = (ext) => MIME[ext] || "application/octet-stream";
 
-async function write(name, buf) {
-  await fsp.writeFile(path.join(DIR, name), buf, { flag: "wx", mode: 0o600 });
-}
+const save = (buf, ext) => gridfs.save("photos", Readable.from(buf), `photo.${ext}`, mimeFor(ext));
+const remove = (id) => gridfs.remove("photos", id);
+const info = (id) => gridfs.info("photos", id);
+const open = (id) => gridfs.open("photos", id);
 
-async function remove(name) {
-  if (!name || !NAME_RE.test(name)) return;
-  await fsp.unlink(path.join(DIR, name)).catch(() => {});
-}
-
-module.exports = { DIR, MAX_BYTES, NAME_RE, detectType, mimeFor, write, remove };
+module.exports = { MAX_BYTES, NAME_RE, detectType, mimeFor, save, remove, info, open };

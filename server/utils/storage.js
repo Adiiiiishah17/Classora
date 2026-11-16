@@ -2,7 +2,8 @@ const fs = require("fs");
 const path = require("path");
 
 // Outside any public folder: files are served only through the API after a login check
-const DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, "..", "uploads", "documents"));
+const os = require("os");
+const DIR = path.resolve(process.env.UPLOAD_DIR || path.join(os.tmpdir(), "classora-uploads"));
 fs.mkdirSync(DIR, { recursive: true });
 
 const MAX_MB = Number(process.env.MAX_UPLOAD_MB || 10);
